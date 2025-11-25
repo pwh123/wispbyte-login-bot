@@ -46,6 +46,32 @@ jobs:
           echo "开始执行 login.py（最多 5 分钟）"
           timeout 5m python login.py && echo "login.py 成功完成" || echo "脚本执行失败或被超时中断"
           echo "本 step 结束"
+          - name: Commit log file to repo
+            env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+           run: |
+           git config user.name "github-actions[bot]"
+           git config user.email "github-actions[bot]@users.noreply.github.com"
+           
+           # 定义当前上海时间
+           CURRENT_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')
+           
+           # 处理日志文件
+           if [ ! -f click_log.txt ]; then
+             echo "初始化日志文件于 $CURRENT_TIME" > click_log.txt
+           else
+             echo "最后一次操作执行于: $CURRENT_TIME" > click_log.txt
+           fi
+           
+           git add click_log.txt
+           
+           # 提交变更
+           if git diff --cached --quiet; then
+             echo "无变化，无需提交"
+           else
+             git commit -m "更新日志: $CURRENT_TIME"
+             git push https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git HEAD:main
+           fi
 
   notify-failure:
     needs: login
