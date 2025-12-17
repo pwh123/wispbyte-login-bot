@@ -73,11 +73,11 @@ async def login_and_restart(email: str, password: str):
             await page.fill('input[type="password"]', password)
             await page.click('button:has-text("Log In")')
 
-            # 等待跳转到服务器列表
-            await page.wait_for_url("**/client/servers**", timeout=30000)
-            print(f"[{email}] 登录成功，进入服务器列表")
+            # 等待登录完成，不强制等待 /client/servers
+            await page.wait_for_load_state("networkidle", timeout=60000)
+            print(f"[{email}] 登录成功")
 
-            # 跳转到控制台
+            # 直接跳转到控制台
             await page.goto(CONSOLE_URL, wait_until="load", timeout=60000)
             await page.wait_for_load_state("domcontentloaded")
             print(f"[{email}] 已进入控制台: {page.url}")
