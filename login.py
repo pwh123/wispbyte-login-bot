@@ -65,21 +65,19 @@ async def login_and_restart(email: str, password: str):
 
         try:
             print(f"[{email}] 打开登录页...")
-            await page.goto(LOGIN_URL, wait_until="load", timeout=90000)
-            await page.wait_for_load_state("domcontentloaded")
+            await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=90000)
 
             # 输入账号密码
             await page.fill('input[type="email"], input[type="text"]', email)
             await page.fill('input[type="password"]', password)
             await page.click('button:has-text("Log In")')
 
-            # 等待登录完成，不强制等待 /client/servers
-            await page.wait_for_load_state("networkidle", timeout=60000)
+            # 等待登录完成（用 domcontentloaded，而不是 networkidle）
+            await page.wait_for_load_state("domcontentloaded", timeout=30000)
             print(f"[{email}] 登录成功")
 
             # 直接跳转到控制台
-            await page.goto(CONSOLE_URL, wait_until="load", timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
+            await page.goto(CONSOLE_URL, wait_until="domcontentloaded", timeout=60000)
             print(f"[{email}] 已进入控制台: {page.url}")
 
             # 点击重启图标按钮
