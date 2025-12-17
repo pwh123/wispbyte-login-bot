@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime
 from playwright.async_api import async_playwright
 import aiohttp
+import re
 
 LOGIN_URL = "https://wispbyte.com/client/login"
 CONSOLE_URL = "https://wispbyte.com/client/servers/fb8b17d4/console"  # 替换成你的控制台路径
@@ -50,7 +51,7 @@ async def tg_notify_file(file_path: str, caption: str = ""):
             except:
                 pass
 
-async def login_and_debug(email: str, password: str):
+async def login_and_restart(email: str, password: str):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=[
             "--no-sandbox", "--disable-setuid-sandbox",
@@ -92,6 +93,44 @@ async def login_and_debug(email: str, password: str):
                 f.write(content)
             await tg_notify_file(html_path, caption=f"📄 控制台 HTML源码\n账号: <code>{email}</code>\nURL: {page.url}")
 
+            # 自动解析 HTML，找出包含 restart 的元素
+            matches = re.findall(r'(<[^>]*restart[^>]*>)', content, flags=re.IGNORECASE)
+            selectors = []
+            for m in matches:
+                # 提取可能的 class 或标签
+                tag_match = re.search(r'<(\w+)', m)
+                class_match = re.search(r'class="([^"]*restart[^"]*)"', m, flags=re.IGNORECASE)
+                if tag_match:
+                    tag = tag_match.group(1)
+                    if class_match:
+                        selectors.append(f"{tag}[class*='restart']")
+                    else:
+                        selectors.append(f"{tag}")
+            if not selectors:
+                selectors = ["button:has-text('重启')", "i[class*='restart']", "svg[class*='restart']"]
+
+            # 尝试点击候选选择器
+            clicked = False
+            for sel in selectors:
+                try:
+                    print(f"[{email}] 尝试点击选择器: {sel}")
+                    await page.wait_for_selector(sel, timeout=5000)
+                    await page.click(sel)
+                    clicked = True
+                    break
+                except Exception as e:
+                    print(f"[{email}] 选择器 {sel} 点击失败: {e}")
+
+            if clicked:
+                await asyncio.sleep(5)
+                msg = f"✅ 成功点击重启按钮\n账号: <code>{email}</code>\n时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                print(msg)
+                await tg_notify(msg)
+            else:
+                msg = f"❌ 未找到可点击的重启按钮\n账号: <code>{email}</code>"
+                print(msg)
+                await tg_notify(msg)
+
         finally:
             await context.close()
             await browser.close()
@@ -103,8 +142,8 @@ async def main():
         return
 
     email, password = accounts_str.split(":", 1)
-    await login_and_debug(email, password)
+    await login_and_restart(email, password)
 
 if __name__ == "__main__":
-    print(f"[{datetime.now()}] 单账号登录并调试开始运行")
+    print(f"[{datetime.now()}] 单账号登录并尝试点击重启开始运行")
     asyncio.run(main())
