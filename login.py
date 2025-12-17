@@ -26,31 +26,31 @@ async def tg_notify(message: str):
         except Exception as e:
             print(f"Warning: Telegram 消息发送失败: {e}")
 
-async def tg_notify_photo(photo_path: str, caption: str = ""):
+async def tg_notify_file(file_path: str, caption: str = ""):
     token = os.getenv("TG_BOT_TOKEN")
     chat_id = os.getenv("TG_CHAT_ID")
     if not token or not chat_id:
         return
-    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    url = f"https://api.telegram.org/bot{token}/sendDocument"
     async with aiohttp.ClientSession() as session:
         try:
-            with open(photo_path, "rb") as f:
+            with open(file_path, "rb") as f:
                 data = aiohttp.FormData()
                 data.add_field("chat_id", chat_id)
-                data.add_field("photo", f, filename=os.path.basename(photo_path))
+                data.add_field("document", f, filename=os.path.basename(file_path))
                 if caption:
                     data.add_field("caption", caption)
                     data.add_field("parse_mode", "HTML")
                 await session.post(url, data=data)
         except Exception as e:
-            print(f"Warning: Telegram 图片发送失败: {e}")
+            print(f"Warning: Telegram 文件发送失败: {e}")
         finally:
             try:
-                os.remove(photo_path)
+                os.remove(file_path)
             except:
                 pass
 
-async def login_and_restart(email: str, password: str):
+async def login_and_debug(email: str, password: str):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=[
             "--no-sandbox", "--disable-setuid-sandbox",
@@ -72,28 +72,25 @@ async def login_and_restart(email: str, password: str):
             await page.fill('input[type="password"]', password)
             await page.click('button:has-text("Log In")')
 
-            # 等待登录完成（用 domcontentloaded，而不是 networkidle）
+            # 等待登录完成
             await page.wait_for_load_state("domcontentloaded", timeout=30000)
             print(f"[{email}] 登录成功")
 
-            # 直接跳转到控制台
+            # 跳转到控制台
             await page.goto(CONSOLE_URL, wait_until="domcontentloaded", timeout=60000)
             print(f"[{email}] 已进入控制台: {page.url}")
 
-            # 点击重启图标按钮
-            try:
-                await page.wait_for_selector("i.icon-restart", timeout=20000)
-                await page.click("i.icon-restart")
-                await asyncio.sleep(5)
-                msg = f"✅ 成功重启服务器\n账号: <code>{email}</code>\n时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                print(msg)
-                await tg_notify(msg)
-            except Exception as e:
-                screenshot = f"restart_error_{email.replace('@', '_')}_{int(datetime.now().timestamp())}.png"
-                await page.screenshot(path=screenshot, full_page=True)
-                msg = f"❌ 重启失败\n账号: <code>{email}</code>\n错误: <i>{str(e)[:200]}</i>\nURL: {page.url}"
-                print(msg)
-                await tg_notify_photo(screenshot, caption=msg)
+            # 截图整个页面
+            screenshot = f"console_debug_{email.replace('@', '_')}_{int(datetime.now().timestamp())}.png"
+            await page.screenshot(path=screenshot, full_page=True)
+            await tg_notify_file(screenshot, caption=f"📸 控制台截图\n账号: <code>{email}</code>\nURL: {page.url}")
+
+            # 保存页面 HTML
+            html_path = f"console_html_{email.replace('@', '_')}_{int(datetime.now().timestamp())}.txt"
+            content = await page.content()
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            await tg_notify_file(html_path, caption=f"📄 控制台 HTML源码\n账号: <code>{email}</code>\nURL: {page.url}")
 
         finally:
             await context.close()
@@ -106,8 +103,8 @@ async def main():
         return
 
     email, password = accounts_str.split(":", 1)
-    await login_and_restart(email, password)
+    await login_and_debug(email, password)
 
 if __name__ == "__main__":
-    print(f"[{datetime.now()}] 单账号登录并重启开始运行")
+    print(f"[{datetime.now()}] 单账号登录并调试开始运行")
     asyncio.run(main())
