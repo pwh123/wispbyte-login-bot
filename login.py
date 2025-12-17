@@ -3,7 +3,6 @@ import asyncio
 from datetime import datetime
 from playwright.async_api import async_playwright
 import aiohttp
-import re
 
 LOGIN_URL = "https://wispbyte.com/client/login"
 CONSOLE_URL = "https://wispbyte.com/client/servers/fb8b17d4/console"  # 替换成你的控制台路径
@@ -27,31 +26,7 @@ async def tg_notify(message: str):
         except Exception as e:
             print(f"Warning: Telegram 消息发送失败: {e}")
 
-async def tg_notify_file(file_path: str, caption: str = ""):
-    token = os.getenv("TG_BOT_TOKEN")
-    chat_id = os.getenv("TG_CHAT_ID")
-    if not token or not chat_id:
-        return
-    url = f"https://api.telegram.org/bot{token}/sendDocument"
-    async with aiohttp.ClientSession() as session:
-        try:
-            with open(file_path, "rb") as f:
-                data = aiohttp.FormData()
-                data.add_field("chat_id", chat_id)
-                data.add_field("document", f, filename=os.path.basename(file_path))
-                if caption:
-                    data.add_field("caption", caption)
-                    data.add_field("parse_mode", "HTML")
-                await session.post(url, data=data)
-        except Exception as e:
-            print(f"Warning: Telegram 文件发送失败: {e}")
-        finally:
-            try:
-                os.remove(file_path)
-            except:
-                pass
-
-async def login_and_restart(email: str, password: str):
+async def login_and_restart_iframes(email: str, password: str):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=[
             "--no-sandbox", "--disable-setuid-sandbox",
@@ -81,45 +56,25 @@ async def login_and_restart(email: str, password: str):
             await page.goto(CONSOLE_URL, wait_until="domcontentloaded", timeout=60000)
             print(f"[{email}] 已进入控制台: {page.url}")
 
-            # 截图整个页面
-            screenshot = f"console_debug_{email.replace('@', '_')}_{int(datetime.now().timestamp())}.png"
-            await page.screenshot(path=screenshot, full_page=True)
-            await tg_notify_file(screenshot, caption=f"📸 控制台截图\n账号: <code>{email}</code>\nURL: {page.url}")
+            # 遍历所有 iframe，尝试点击重启按钮
+            frames = page.frames
+            print(f"[{email}] 控制台中发现 {len(frames)} 个 iframe")
 
-            # 保存页面 HTML
-            html_path = f"console_html_{email.replace('@', '_')}_{int(datetime.now().timestamp())}.txt"
-            content = await page.content()
-            with open(html_path, "w", encoding="utf-8") as f:
-                f.write(content)
-            await tg_notify_file(html_path, caption=f"📄 控制台 HTML源码\n账号: <code>{email}</code>\nURL: {page.url}")
-
-            # 自动解析 HTML，找出包含 restart 的元素
-            matches = re.findall(r'(<[^>]*restart[^>]*>)', content, flags=re.IGNORECASE)
-            selectors = []
-            for m in matches:
-                # 提取可能的 class 或标签
-                tag_match = re.search(r'<(\w+)', m)
-                class_match = re.search(r'class="([^"]*restart[^"]*)"', m, flags=re.IGNORECASE)
-                if tag_match:
-                    tag = tag_match.group(1)
-                    if class_match:
-                        selectors.append(f"{tag}[class*='restart']")
-                    else:
-                        selectors.append(f"{tag}")
-            if not selectors:
-                selectors = ["button:has-text('重启')", "i[class*='restart']", "svg[class*='restart']"]
-
-            # 尝试点击候选选择器
             clicked = False
-            for sel in selectors:
-                try:
-                    print(f"[{email}] 尝试点击选择器: {sel}")
-                    await page.wait_for_selector(sel, timeout=5000)
-                    await page.click(sel)
-                    clicked = True
+            for idx, frame in enumerate(frames):
+                for sel in ["button:has-text('重启')", "button:has-text('Restart')",
+                            "i[class*='restart']", "svg[class*='restart']",
+                            "button[class*='restart']"]:
+                    try:
+                        print(f"[{email}] 尝试在 iframe {idx} 点击选择器: {sel}")
+                        await frame.wait_for_selector(sel, timeout=5000)
+                        await frame.click(sel)
+                        clicked = True
+                        break
+                    except Exception as e:
+                        print(f"[{email}] iframe {idx} 选择器 {sel} 点击失败: {e}")
+                if clicked:
                     break
-                except Exception as e:
-                    print(f"[{email}] 选择器 {sel} 点击失败: {e}")
 
             if clicked:
                 await asyncio.sleep(5)
@@ -127,7 +82,7 @@ async def login_and_restart(email: str, password: str):
                 print(msg)
                 await tg_notify(msg)
             else:
-                msg = f"❌ 未找到可点击的重启按钮\n账号: <code>{email}</code>"
+                msg = f"❌ 未找到可点击的重启按钮（可能选择器不同）\n账号: <code>{email}</code>"
                 print(msg)
                 await tg_notify(msg)
 
@@ -142,8 +97,8 @@ async def main():
         return
 
     email, password = accounts_str.split(":", 1)
-    await login_and_restart(email, password)
+    await login_and_restart_iframes(email, password)
 
 if __name__ == "__main__":
-    print(f"[{datetime.now()}] 单账号登录并尝试点击重启开始运行")
+    print(f"[{datetime.now()}] 单账号登录并尝试点击 iframe 内重启开始运行")
     asyncio.run(main())
